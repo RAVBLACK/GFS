@@ -87,16 +87,16 @@ const InvoiceResult = () => {
             </div>
             <div className="grid grid-cols-3 gap-2 mt-3 text-center">
               <div className="bg-muted rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground">CGST</p>
-                <p className="text-sm font-bold text-foreground">₹{inv.cgst.toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Base Amount</p>
+                <p className="text-sm font-bold text-foreground">₹{(inv.taxableAmount || 0).toLocaleString()}</p>
               </div>
               <div className="bg-muted rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground">SGST</p>
-                <p className="text-sm font-bold text-foreground">₹{inv.sgst.toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Total Tax</p>
+                <p className="text-sm font-bold text-foreground">₹{((inv.cgst || 0) + (inv.sgst || 0) + (inv.igst || 0)).toLocaleString()}</p>
               </div>
               <div className="bg-primary/10 rounded-lg p-2">
-                <p className="text-[10px] text-muted-foreground">Total</p>
-                <p className="text-sm font-bold text-primary">₹{inv.total.toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">To be Paid</p>
+                <p className="text-sm font-bold text-primary">₹{(inv.total || 0).toLocaleString()}</p>
               </div>
             </div>
           </div>

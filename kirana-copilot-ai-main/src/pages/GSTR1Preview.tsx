@@ -93,7 +93,7 @@ const GSTR1Preview = () => {
             <IndianRupee className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <p className="text-sm text-muted-foreground">Total Amount</p>
+            <p className="text-sm text-muted-foreground">Amount to be Paid</p>
             <p className="text-2xl font-extrabold text-foreground">₹{summary.totalAmount.toLocaleString()}</p>
           </div>
         </div>
@@ -101,11 +101,11 @@ const GSTR1Preview = () => {
         <div className="grid grid-cols-2 gap-3">
           {[
             { label: "Invoices", value: summary.totalInvoices },
-            { label: "Taxable Amount", value: `₹${summary.totalTaxableAmount.toLocaleString()}` },
+            { label: "Base Amount", value: `₹${summary.totalTaxableAmount.toLocaleString()}` },
+            { label: "Total Tax", value: `₹${summary.totalTax.toLocaleString()}` },
             { label: "CGST", value: `₹${summary.totalCGST.toLocaleString()}` },
             { label: "SGST", value: `₹${summary.totalSGST.toLocaleString()}` },
             { label: "IGST", value: `₹${summary.totalIGST.toLocaleString()}` },
-            { label: "Total Tax", value: `₹${summary.totalTax.toLocaleString()}` },
           ].map(({ label, value }) => (
             <div key={label} className="bg-muted rounded-xl p-3">
               <p className="text-[10px] text-muted-foreground uppercase font-semibold">{label}</p>
