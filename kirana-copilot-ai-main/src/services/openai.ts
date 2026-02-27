@@ -144,7 +144,7 @@ Important notes:
     const parsedData = JSON.parse(jsonMatch[0]);
 
     // Add unique IDs to invoices
-    const invoicesWithIds: InvoiceData[] = parsedData.invoices.map((inv: any, index: number) => ({
+    const invoicesWithIds: InvoiceData[] = parsedData.invoices.map((inv: Omit<InvoiceData, 'id'>, index: number) => ({
       id: `inv_${Date.now()}_${index}`,
       ...inv
     }));

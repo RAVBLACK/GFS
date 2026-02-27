@@ -120,7 +120,7 @@ export const analyzeInvoices = async (files: File[]): Promise<AnalysisResult> =>
 }`;
 
       try {
-        const result = await queryHuggingFace(base64Image, prompt);
+        const result = await queryHuggingFace(base64Image);
         console.log(`Invoice ${i + 1} raw result:`, result);
         
         // Parse response - HF returns array format
@@ -175,7 +175,7 @@ export const analyzeInvoices = async (files: File[]): Promise<AnalysisResult> =>
           throw new Error('Failed to parse model response');
         }
         
-      } catch (modelError: any) {
+      } catch (modelError) {
         console.error(`Error processing invoice ${i + 1}:`, modelError);
         
         // Add placeholder with error info
