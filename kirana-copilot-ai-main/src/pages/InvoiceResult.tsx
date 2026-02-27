@@ -35,7 +35,6 @@ const InvoiceResult = () => {
 
   // Use data from navigation state, fallback to mock data if not available
   const invoices = state?.invoices || [];
-  const explanation = state?.explanation || "No analysis results available.";
 
   // If no invoices, redirect back
   if (invoices.length === 0) {
@@ -61,13 +60,6 @@ const InvoiceResult = () => {
       <div className="mb-4">
         <h1 className="text-xl font-extrabold text-foreground">📊 Analysis Results</h1>
         <p className="text-sm text-muted-foreground">{invoices.length} invoices processed</p>
-      </div>
-
-      {/* AI explanation */}
-      <div className="bg-accent/50 border border-accent rounded-xl p-4 mb-5">
-        <p className="text-sm text-accent-foreground font-medium">
-          🤖 {explanation}
-        </p>
       </div>
 
       {/* Invoice cards */}

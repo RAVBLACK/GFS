@@ -1,6 +1,7 @@
 """
 Flask Backend for Invoice OCR Analysis
-Uses Hugging Face models locally - 100% FREE, no API keys!
+Uses local models - 100% FREE, no API keys!
+Supports both image and PDF invoice analysis
 """
 
 from flask import Flask, request, jsonify
@@ -9,6 +10,7 @@ import base64
 import io
 from datetime import datetime
 from PIL import Image
+from pdf2image import convert_from_bytes
 
 # Import OCR engine
 from invoice_analyzer import InvoiceAnalyzer
@@ -30,89 +32,197 @@ def health_check():
             "status": "ok",
             "message": "Invoice OCR Backend Running",
             "model": "EasyOCR + Transformers",
+            "formats": "Images (JPG, PNG) and PDFs"
         }
     )
+
+
+def convert_pdf_to_images(pdf_base64):
+    """
+    Convert PDF base64 to list of PIL Images
+    Handles multi-page PDFs by converting each page to an image
+    """
+    try:
+        # Remove data URL prefix if present
+        if "," in pdf_base64:
+            pdf_base64 = pdf_base64.split(",")[1]
+
+        # Decode base64 PDF
+        pdf_data = base64.b64decode(pdf_base64)
+        
+        # Convert PDF pages to images
+        images = convert_from_bytes(pdf_data, dpi=200)  # 200 DPI for better OCR
+        
+        print(f"   Converted PDF to {len(images)} page(s)")
+        
+        return images
+    except Exception as e:
+        print(f"   ❌ Error converting PDF: {e}")
+        raise
 
 
 @app.route("/analyze", methods=["POST"])
 def analyze_invoices():
     """
-    Analyze invoice images and extract GST data
+    Analyze invoice images and PDFs and extract GST data
     Expects: { "images": ["base64_string1", "base64_string2", ...] }
     Returns: { "invoices": [...], "explanation": "..." }
+    Supports both images and PDFs
     """
     try:
         data = request.json
-        images = data.get("images", [])
+        files = data.get("images", [])
 
-        if not images:
-            return jsonify({"error": "No images provided"}), 400
+        if not files:
+            return jsonify({"error": "No files provided"}), 400
 
         all_invoices = []
+        total_files = len(files)
+        current_invoice_idx = 0
 
-        for idx, base64_image in enumerate(images):
-            print(f"\n📄 Processing invoice {idx + 1}/{len(images)}...")
-
-            # Decode base64 image
+        for file_idx, base64_file in enumerate(files):
+            print(f"\n📄 Processing file {file_idx + 1}/{total_files}...")
+            
             try:
-                # Remove data URL prefix if present
-                if "," in base64_image:
-                    base64_image = base64_image.split(",")[1]
+                # Prepare base64 data
+                file_base64 = base64_file
+                if "," in file_base64:
+                    file_base64 = file_base64.split(",")[1]
 
-                image_data = base64.b64decode(base64_image)
-                image = Image.open(io.BytesIO(image_data))
+                # Decode to check file type
+                file_data = base64.b64decode(file_base64)
+                
+                # Check if it's a PDF by looking for PDF signature
+                is_pdf = file_data[:4] == b'%PDF'
+                
+                if is_pdf:
+                    print(f"   📄 Type: PDF - Converting to images...")
+                    
+                    try:
+                        # Convert PDF pages to images
+                        pdf_images = convert_pdf_to_images(file_base64)
+                        
+                        # Process each page as a separate invoice
+                        for page_num, page_image in enumerate(pdf_images):
+                            current_invoice_idx += 1
+                            print(f"      Processing page {page_num + 1}/{len(pdf_images)}...")
+                            
+                            # Convert to RGB if needed
+                            if page_image.mode != "RGB":
+                                page_image = page_image.convert("RGB")
+                            
+                            # Analyze invoice
+                            try:
+                                invoice_data = analyzer.extract_invoice_data(page_image)
+                                invoice_data["id"] = f"inv_{datetime.now().timestamp()}_{current_invoice_idx}"
+                                all_invoices.append(invoice_data)
+                                
+                                print(f"      ✅ Extracted: {invoice_data['vendor']}")
+                                print(f"         Confidence: {invoice_data['confidence']:.2f}")
+                            except Exception as e:
+                                print(f"      ❌ Analysis error: {e}")
+                                all_invoices.append({
+                                    "id": f"inv_{datetime.now().timestamp()}_{current_invoice_idx}",
+                                    "vendor": "Analysis error",
+                                    "gstin": "N/A",
+                                    "invoiceNo": f"Page_{page_num + 1}",
+                                    "date": datetime.now().strftime("%d-%m-%Y"),
+                                    "taxableAmount": 0,
+                                    "cgst": 0,
+                                    "sgst": 0,
+                                    "igst": 0,
+                                    "total": 0,
+                                    "confidence": 0.2,
+                                })
+                    except Exception as e:
+                        print(f"   ❌ PDF conversion error: {e}")
+                        current_invoice_idx += 1
+                        all_invoices.append({
+                            "id": f"inv_{datetime.now().timestamp()}_{current_invoice_idx}",
+                            "vendor": "PDF conversion error",
+                            "gstin": "N/A",
+                            "invoiceNo": f"PDF_{file_idx + 1}",
+                            "date": datetime.now().strftime("%d-%m-%Y"),
+                            "taxableAmount": 0,
+                            "cgst": 0,
+                            "sgst": 0,
+                            "igst": 0,
+                            "total": 0,
+                            "confidence": 0.1,
+                        })
+                
+                else:
+                    # Process as image
+                    print(f"   🖼️  Type: Image - Processing...")
+                    current_invoice_idx += 1
+                    
+                    try:
+                        image_data = base64.b64decode(file_base64)
+                        image = Image.open(io.BytesIO(image_data))
 
-                # Convert to RGB if needed
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
+                        # Convert to RGB if needed
+                        if image.mode != "RGB":
+                            image = image.convert("RGB")
 
-                print(f"   Image size: {image.size}")
+                        print(f"      Image size: {image.size}")
+                        
+                        # Analyze invoice
+                        try:
+                            invoice_data = analyzer.extract_invoice_data(image)
+                            invoice_data["id"] = f"inv_{datetime.now().timestamp()}_{current_invoice_idx}"
+                            all_invoices.append(invoice_data)
 
+                            print(f"      ✅ Extracted: {invoice_data['vendor']}")
+                            print(f"         Confidence: {invoice_data['confidence']:.2f}")
+
+                        except Exception as e:
+                            print(f"      ❌ Analysis error: {e}")
+                            all_invoices.append({
+                                "id": f"inv_{datetime.now().timestamp()}_{current_invoice_idx}",
+                                "vendor": "Analysis error",
+                                "gstin": "N/A",
+                                "invoiceNo": f"Image_{file_idx + 1}",
+                                "date": datetime.now().strftime("%d-%m-%Y"),
+                                "taxableAmount": 0,
+                                "cgst": 0,
+                                "sgst": 0,
+                                "igst": 0,
+                                "total": 0,
+                                "confidence": 0.2,
+                            })
+                    
+                    except Exception as e:
+                        print(f"   ❌ Error decoding image: {e}")
+                        all_invoices.append({
+                            "id": f"inv_{datetime.now().timestamp()}_{current_invoice_idx}",
+                            "vendor": "Image decode error",
+                            "gstin": "N/A",
+                            "invoiceNo": f"Image_{file_idx + 1}",
+                            "date": datetime.now().strftime("%d-%m-%Y"),
+                            "taxableAmount": 0,
+                            "cgst": 0,
+                            "sgst": 0,
+                            "igst": 0,
+                            "total": 0,
+                            "confidence": 0.1,
+                        })
+                        
             except Exception as e:
-                print(f"   ❌ Error decoding image: {e}")
-                all_invoices.append(
-                    {
-                        "id": f"inv_{datetime.now().timestamp()}_{idx}",
-                        "vendor": "Image decode error",
-                        "gstin": "N/A",
-                        "invoiceNo": f"Invoice_{idx + 1}",
-                        "date": datetime.now().strftime("%d-%m-%Y"),
-                        "taxableAmount": 0,
-                        "cgst": 0,
-                        "sgst": 0,
-                        "igst": 0,
-                        "total": 0,
-                        "confidence": 0.1,
-                    }
-                )
-                continue
-
-            # Analyze invoice
-            try:
-                invoice_data = analyzer.extract_invoice_data(image)
-                invoice_data["id"] = f"inv_{datetime.now().timestamp()}_{idx}"
-                all_invoices.append(invoice_data)
-
-                print(f"   ✅ Extracted: {invoice_data['vendor']}")
-                print(f"   Confidence: {invoice_data['confidence']:.2f}")
-
-            except Exception as e:
-                print(f"   ❌ Analysis error: {e}")
-                all_invoices.append(
-                    {
-                        "id": f"inv_{datetime.now().timestamp()}_{idx}",
-                        "vendor": "Analysis error",
-                        "gstin": "N/A",
-                        "invoiceNo": f"Invoice_{idx + 1}",
-                        "date": datetime.now().strftime("%d-%m-%Y"),
-                        "taxableAmount": 0,
-                        "cgst": 0,
-                        "sgst": 0,
-                        "igst": 0,
-                        "total": 0,
-                        "confidence": 0.2,
-                    }
-                )
+                print(f"   ❌ Error processing file: {e}")
+                current_invoice_idx += 1
+                all_invoices.append({
+                    "id": f"inv_{datetime.now().timestamp()}_{current_invoice_idx}",
+                    "vendor": "File processing error",
+                    "gstin": "N/A",
+                    "invoiceNo": f"File_{file_idx + 1}",
+                    "date": datetime.now().strftime("%d-%m-%Y"),
+                    "taxableAmount": 0,
+                    "cgst": 0,
+                    "sgst": 0,
+                    "igst": 0,
+                    "total": 0,
+                    "confidence": 0.1,
+                })
 
         # Generate summary
         high_conf = len([inv for inv in all_invoices if inv["confidence"] >= 0.9])
@@ -130,7 +240,6 @@ def analyze_invoices():
     except Exception as e:
         print(f"❌ Server error: {e}")
         import traceback
-
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
@@ -191,7 +300,8 @@ if __name__ == "__main__":
     print("=" * 50)
     print("✅ Using LOCAL AI models (no API keys needed!)")
     print("✅ 100% FREE - no billing ever")
-    print("✅ Models: EasyOCR + Hugging Face Transformers")
+    print("✅ Models: EasyOCR + Transformers")
+    print("✅ Supports: Images (JPG, PNG) and PDFs")
     print("=" * 50 + "\n")
 
     # Run server

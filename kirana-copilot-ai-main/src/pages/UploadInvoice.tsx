@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Camera, ImagePlus, X, ArrowLeft, Sparkles } from "lucide-react";
+import { Camera, ImagePlus, X, ArrowLeft, Sparkles, File } from "lucide-react";
 import LoadingScreen from "@/components/LoadingScreen";
 import { processInvoices } from "@/services/api";
 import { toast } from "sonner";
@@ -11,23 +11,26 @@ interface UploadedFile {
   name: string;
   preview: string;
   file: File;
+  type: 'image' | 'pdf';
 }
 
 const UploadInvoice = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [processing, setProcessing] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'image' | 'pdf' = 'image') => {
     const selected = e.target.files;
     if (!selected) return;
     const newFiles = Array.from(selected).map((f) => ({
       id: `file_${Date.now()}_${Math.random()}`,
       name: f.name,
-      preview: URL.createObjectURL(f),
+      preview: fileType === 'pdf' ? 'pdf' : URL.createObjectURL(f),
       file: f,
+      type: fileType,
     }));
     setFiles((prev) => [...prev, ...newFiles]);
   };
@@ -79,14 +82,14 @@ const UploadInvoice = () => {
       </div>
 
       {/* Upload buttons */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-3 mb-6">
         <input
           ref={cameraInputRef}
           type="file"
           accept="image/*"
           capture="environment"
           className="hidden"
-          onChange={handleFileChange}
+          onChange={(e) => handleFileChange(e, 'image')}
         />
         <input
           ref={fileInputRef}
@@ -94,7 +97,15 @@ const UploadInvoice = () => {
           accept="image/*"
           multiple
           className="hidden"
-          onChange={handleFileChange}
+          onChange={(e) => handleFileChange(e, 'image')}
+        />
+        <input
+          ref={pdfInputRef}
+          type="file"
+          accept=".pdf,application/pdf"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFileChange(e, 'pdf')}
         />
         <button
           onClick={() => cameraInputRef.current?.click()}
@@ -110,16 +121,30 @@ const UploadInvoice = () => {
           <ImagePlus className="w-8 h-8 text-secondary" />
           <span className="text-sm font-semibold text-foreground">Gallery</span>
         </button>
+        <button
+          onClick={() => pdfInputRef.current?.click()}
+          className="flex flex-col items-center gap-2 p-6 bg-card border-2 border-dashed border-blue-500/30 rounded-xl hover:border-blue-500 transition-colors"
+        >
+          <File className="w-8 h-8 text-blue-500" />
+          <span className="text-sm font-semibold text-foreground">PDF</span>
+        </button>
       </div>
 
       {/* Uploaded files */}
       {files.length > 0 && (
         <div className="space-y-3 mb-6">
-          <p className="text-sm font-bold text-foreground">{files.length} invoice(s) added</p>
+          <p className="text-sm font-bold text-foreground">{files.length} file(s) added</p>
           <div className="grid grid-cols-3 gap-2">
             {files.map((f) => (
-              <div key={f.id} className="relative rounded-xl overflow-hidden aspect-square border border-border">
-                <img src={f.preview} alt={f.name} className="w-full h-full object-cover" />
+              <div key={f.id} className="relative rounded-xl overflow-hidden aspect-square border border-border bg-card flex items-center justify-center">
+                {f.type === 'pdf' ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <File className="w-6 h-6 text-blue-500" />
+                    <span className="text-xs text-center text-muted-foreground px-1 line-clamp-2">{f.name}</span>
+                  </div>
+                ) : (
+                  <img src={f.preview} alt={f.name} className="w-full h-full object-cover" />
+                )}
                 <button
                   onClick={() => removeFile(f.id)}
                   className="absolute top-1 right-1 w-6 h-6 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center"
@@ -146,7 +171,8 @@ const UploadInvoice = () => {
       {files.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-muted-foreground text-center text-sm">
-            📸 Take a clear photo of each invoice.<br />
+            📸 Take a photo or select from gallery.<br />
+            📄 Or upload a PDF file.<br />
             We'll read the GST details for you!
           </p>
         </div>
