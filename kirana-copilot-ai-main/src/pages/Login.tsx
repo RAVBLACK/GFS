@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useShop } from "@/contexts/ShopContext";
@@ -6,36 +6,159 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Phone, ArrowRight } from "lucide-react";
+import { toast } from "sonner";
 import LoadingScreen from "@/components/LoadingScreen";
 import LightRays from "@/components/LightRays";
+import { setupRecaptcha } from "@/lib/firebase";
+import { sendOTP, verifyOTP } from "@/services/auth";
+import { ConfirmationResult, RecaptchaVerifier } from "firebase/auth";
 
 const Login = () => {
-  const { login, loading } = useAuth();
+  const { loading, setUser } = useAuth();
   const { shops } = useShop();
   const navigate = useNavigate();
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
-  const handleSendOtp = () => {
-    if (phone.length >= 10) {
+  useEffect(() => {
+    // Setup reCAPTCHA on component mount
+    try {
+      const verifier = setupRecaptcha('recaptcha-container');
+      setRecaptchaVerifier(verifier);
+    } catch (error) {
+      console.error('Error setting up reCAPTCHA:', error);
+      toast.error('Failed to initialize authentication');
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (recaptchaVerifier) {
+        recaptchaVerifier.clear();
+      }
+    };
+  }, []);
+
+  const handleSendOtp = async () => {
+    if (phone.length < 10) {
+      toast.error('Please enter a valid 10-digit phone number');
+      return;
+    }
+
+    if (!recaptchaVerifier) {
+      toast.error('reCAPTCHA not initialized. Please refresh the page.');
+      return;
+    }
+
+    setSending(true);
+
+    try {
+      const confirmation = await sendOTP(phone, recaptchaVerifier);
+      setConfirmationResult(confirmation);
       setOtpSent(true);
+      toast.success('OTP sent successfully!');
+    } catch (error: unknown) {
+      console.error('Error sending OTP:', error);
+      
+      // Handle specific Firebase errors
+      if (error instanceof Error) {
+        const errorMessage = error.message;
+        
+        if (errorMessage.includes('auth/invalid-phone-number')) {
+          toast.error('Invalid phone number format. Please enter 10 digits.');
+        } else if (errorMessage.includes('auth/too-many-requests')) {
+          toast.error('Too many requests. Please try again after some time.');
+        } else if (errorMessage.includes('auth/invalid-app-credential')) {
+          toast.error('Firebase configuration error. Please contact support.');
+        } else if (errorMessage.includes('auth/unauthorized-domain')) {
+          toast.error('Unauthorized domain. Please contact support.');
+        } else if (errorMessage.includes('auth/quota-exceeded')) {
+          toast.error('SMS quota exceeded. Please try with test numbers.');
+        } else {
+          toast.error(`Failed to send OTP: ${errorMessage}`);
+        }
+      } else {
+        toast.error('Failed to send OTP. Please try again.');
+      }
+      
+      // Recreate reCAPTCHA verifier on error
+      try {
+        if (recaptchaVerifier) {
+          recaptchaVerifier.clear();
+        }
+        const newVerifier = setupRecaptcha('recaptcha-container');
+        setRecaptchaVerifier(newVerifier);
+      } catch (recaptchaError) {
+        console.error('Error recreating reCAPTCHA:', recaptchaError);
+      }
+    } finally {
+      setSending(false);
     }
   };
 
   const handleVerify = async () => {
-    await login(phone, otp);
-    if (shops.length === 0) {
-      navigate("/setup");
-    } else {
-      navigate("/shops");
+    if (otp.length < 6) {
+      toast.error('Please enter a valid 6-digit OTP');
+      return;
+    }
+
+    if (!confirmationResult) {
+      toast.error('Please request OTP first');
+      return;
+    }
+
+    setVerifying(true);
+
+    try {
+      const user = await verifyOTP(confirmationResult, otp);
+      
+      // Update auth context
+      setUser({
+        uid: user.uid,
+        phone: user.phoneNumber || phone,
+        displayName: user.displayName || undefined,
+      });
+
+      toast.success('Login successful!');
+      
+      // Navigate based on shop setup
+      if (shops.length === 0) {
+        navigate("/setup");
+      } else {
+        navigate("/shops");
+      }
+    } catch (error: unknown) {
+      console.error('Error verifying OTP:', error);
+      
+      if (error instanceof Error) {
+        if (error.message.includes('invalid-verification-code')) {
+          toast.error('Invalid OTP. Please try again.');
+        } else if (error.message.includes('code-expired')) {
+          toast.error('OTP expired. Please request a new one.');
+          setOtpSent(false);
+          setOtp('');
+        } else {
+          toast.error('Failed to verify OTP. Please try again.');
+        }
+      } else {
+        toast.error('Failed to verify OTP. Please try again.');
+      }
+    } finally {
+      setVerifying(false);
     }
   };
 
-  if (loading) return <LoadingScreen message="Verifying OTP..." />;
+  if (loading) return <LoadingScreen message="Loading..." />;
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-foreground">
+      {/* reCAPTCHA container (invisible) */}
+      <div id="recaptcha-container"></div>
+
       {/* LightRays Background */}
       <div className="absolute inset-0 z-0">
         <LightRays
@@ -63,7 +186,7 @@ const Login = () => {
             </div>
             <h1 className="text-2xl font-extrabold text-primary-foreground">Login with Phone</h1>
             <p className="text-primary-foreground/60 text-sm">
-              Enter your mobile number to get started
+              Enter your mobile number to receive OTP
             </p>
           </div>
 
@@ -82,6 +205,7 @@ const Login = () => {
                   onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                   className="h-12 text-lg font-semibold rounded-xl"
                   maxLength={10}
+                  disabled={otpSent}
                 />
               </div>
             </div>
@@ -89,10 +213,10 @@ const Login = () => {
             {!otpSent ? (
               <Button
                 onClick={handleSendOtp}
-                disabled={phone.length < 10}
+                disabled={phone.length < 10 || sending}
                 className="w-full h-14 text-lg font-bold rounded-xl"
               >
-                Send OTP <ArrowRight className="w-5 h-5 ml-2" />
+                {sending ? 'Sending...' : 'Send OTP'} <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             ) : (
               <div className="space-y-4 animate-slide-up">
@@ -106,18 +230,29 @@ const Login = () => {
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     className="h-12 text-2xl text-center font-bold tracking-[0.5em] rounded-xl"
                     maxLength={6}
+                    autoFocus
                   />
                   <p className="text-xs text-muted-foreground text-center">
-                    Demo: Enter any 6 digits
+                    Enter the 6-digit OTP sent to +91-{phone}
                   </p>
                 </div>
                 <Button
                   onClick={handleVerify}
-                  disabled={otp.length < 6}
+                  disabled={otp.length < 6 || verifying}
                   className="w-full h-14 text-lg font-bold rounded-xl"
                 >
-                  Verify & Continue
+                  {verifying ? 'Verifying...' : 'Verify & Continue'}
                 </Button>
+                <button
+                  onClick={() => {
+                    setOtpSent(false);
+                    setOtp('');
+                    setConfirmationResult(null);
+                  }}
+                  className="text-sm text-primary hover:underline w-full text-center"
+                >
+                  Change phone number
+                </button>
               </div>
             )}
           </div>
